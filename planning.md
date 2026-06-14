@@ -136,6 +136,9 @@ Write out what a full user interaction looks like from start to finish — tool 
 
 **Example user query:** "I'm looking for a vintage graphic tee under $30. I mostly wear baggy jeans and chunky sneakers. What's out there and how would I style it?"
 
+* 2–3 sentence description of what FitFindr needs to do. Include what triggers each tool and what happens when something fails.
+It should first use the search_listings tool to find vintage graphic tees under $30 that match the user's style. Then it should use the suggest_outfit tool to suggest an outfit using the found tee and the user's existing wardrobe. Finally, it should use the create_fit_card tool to create a fit card showing the outfit. If any tool fails, it should try again or ask the user for more information.
+
 **Step 1:**
 <!-- What does the agent do first? Which tool is called? With what input? -->
 
