@@ -18,8 +18,8 @@ Usage (once implemented):
     print(result["error"])   # None on success
 """
 
-from tools import search_listings, suggest_outfit, create_fit_card
-
+from tools import search_listings, suggest_outfit, create_fit_card, _get_groq_client
+import json
 
 # ── session state ─────────────────────────────────────────────────────────────
 
@@ -93,8 +93,70 @@ def run_agent(query: str, wardrobe: dict) -> dict:
     of planning.md — your implementation should match what you described there.
     """
     # TODO: implement the planning loop
+
+    # Step 1: Initialize the session with _new_session().
     session = _new_session(query, wardrobe)
-    session["error"] = "Planning loop not yet implemented."
+
+    # Step 2: Parse the user's query to extract a description, size, and max_price.
+    # Use LLM for parsing the query and store it in session["parsed"].
+    model = _get_groq_client()
+    response_dict = model.chat.completions.create(
+        model="llama-3.3-70b-versatile",
+        messages=[
+            {
+                "role": "system", 
+                "content": "You are an expert parsing assistant. Parse the following user's query to extract a description, size, and max_price. You must return ONLY a valid JSON object with keys 'description', 'size', and 'max_price'. If a value is not found, set it to null."
+            },
+            {
+                "role": "user", 
+                "content": session["query"]
+            }
+        ],
+        response_format={ "type": "json_object" },
+        temperature=0,
+    )
+    parsed_query = response_dict.choices[0].message.content
+    parsed_query = json.loads(parsed_query) # convert the parsed query from a string to a dictionary
+    session["parsed"] = parsed_query
+    
+    
+    # Step 3: Call search_listings() with the parsed parameters.
+    # Store results in session["search_results"].
+    # If no results: set session["error"] to a helpful message and return the session early.
+    # Do NOT proceed to suggest_outfit with empty input.
+    
+    results = search_listings(
+        description=parsed_query["description"],
+        size=parsed_query["size"],
+        max_price=parsed_query["max_price"],
+    )
+    
+    session["search_results"] = results # always store, even if []
+    
+    if not results: # if the results list is empty
+        session["error"] = "No relevant listings found."
+        return session
+
+    # Step 4: Select the item to use (e.g., the top result).
+    # Store it in session["selected_item"].
+    session["selected_item"] = results[0]
+    
+    # Step 5: Call suggest_outfit() with the selected item and wardrobe.
+    # Store the result in session["outfit_suggestion"].
+    suggested_outfit = suggest_outfit(
+        session["selected_item"],
+        wardrobe,
+    )
+    session["outfit_suggestion"] = suggested_outfit
+    
+    # Step 6: Call create_fit_card() with the outfit suggestion and selected item.
+    # Store the result in session["fit_card"].
+    fit_card = create_fit_card(
+        suggested_outfit,
+        session["selected_item"],
+    )
+    session["fit_card"] = fit_card
+    
     return session
 
 
