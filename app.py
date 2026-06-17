@@ -29,9 +29,9 @@ def handle_query(user_query: str, wardrobe_choice: str) -> tuple[str, str, str]:
         wardrobe_choice: Either "Example wardrobe" or "Empty wardrobe (new user)".
 
     Returns:
-        A tuple of three strings:
-            (listing_text, outfit_suggestion, fit_card)
-        Each string maps to one of the three output panels in the UI.
+        A tuple of four strings:
+            (listing_text, outfit_suggestion, fit_card, price_verdict)
+        Each string maps to one of the four output panels in the UI.
 
     TODO:
         1. Guard against an empty query (return early with an error message).
@@ -48,10 +48,11 @@ def handle_query(user_query: str, wardrobe_choice: str) -> tuple[str, str, str]:
     listing_text = ""
     outfit_suggestion = ""
     fit_card = ""
+    price_verdict = ""
 
     # 1. Guard against empty query
     if not user_query.strip():
-        return "Please enter a query.", outfit_suggestion, fit_card
+        return "Please enter a query.", outfit_suggestion, fit_card, price_verdict
 
     # 2. Select the wardrobe based on wardrobe_choice
     if wardrobe_choice == "Example wardrobe":
@@ -65,7 +66,7 @@ def handle_query(user_query: str, wardrobe_choice: str) -> tuple[str, str, str]:
     # 4. If session["error"] is set, return the error in the first panel
     #    and empty strings for the other two.
     if session and session.get("error") is not None:
-        return session.get("error"), outfit_suggestion, fit_card
+        return session.get("error"), outfit_suggestion, fit_card, price_verdict
 
     # 5. Otherwise, format session["selected_item"] into a readable listing_text
     #    string and return it along with session["outfit_suggestion"] and
@@ -80,8 +81,9 @@ def handle_query(user_query: str, wardrobe_choice: str) -> tuple[str, str, str]:
     )
     outfit_suggestion = session.get("outfit_suggestion", "")
     fit_card = session.get("fit_card", "")
+    price_verdict = session.get("price_verdict", "")
 
-    return listing_text, outfit_suggestion, fit_card
+    return listing_text, outfit_suggestion, fit_card, price_verdict
 
 
 # ── interface ─────────────────────────────────────────────────────────────────
@@ -134,6 +136,11 @@ Describe what you're looking for — include size and price if you want to filte
                 lines=8,
                 interactive=False,
             )
+            price_output = gr.Textbox(
+                label="💰 Price Assessment",
+                lines=4,
+                interactive=False,
+            )
 
         gr.Examples(
             examples=[[q, "Example wardrobe"] for q in EXAMPLE_QUERIES],
@@ -144,12 +151,12 @@ Describe what you're looking for — include size and price if you want to filte
         submit_btn.click(
             fn=handle_query,
             inputs=[query_input, wardrobe_choice],
-            outputs=[listing_output, outfit_output, fitcard_output],
+            outputs=[listing_output, outfit_output, fitcard_output, price_output],
         )
         query_input.submit(
             fn=handle_query,
             inputs=[query_input, wardrobe_choice],
-            outputs=[listing_output, outfit_output, fitcard_output],
+            outputs=[listing_output, outfit_output, fitcard_output, price_output],
         )
 
     return demo

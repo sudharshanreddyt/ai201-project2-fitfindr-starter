@@ -36,46 +36,70 @@ If no listings are found, it should return an empty list. It should not make any
 ### Tool 2: suggest_outfit
 
 **What it does:**
-<!-- Describe what this tool does in 1–2 sentences -->
-This tool suggests 1-2 complete outfits using the new item and the user's wardrobe.
+This tool suggests 1-2 complete outfits using the new item, the user's wardrobe, and optionally injects current trend context into the prompt.
 
 **Input parameters:**
-<!-- List each parameter, its type, and what it represents -->
-- `new_item` (dict): The new item that the user is considering buying. It contains the following fields: id, title, description, category, style_tags (list), size, condition, price (float), colors (list), brand, platform
-- `wardrobe` (dict): The user's wardrobe. It contains the following fields: id, title, description, category, style_tags (list), size, condition, price (float), colors (list), brand, platform
+- `new_item` (dict): The new item the user is considering buying. Fields: id, title, description, category, style_tags (list[str]), size, condition, price (float), colors (list[str]), brand, platform
+- `wardrobe` (dict): The user's wardrobe with an `items` key containing a list of wardrobe item dicts. May be empty.
+- `trend_context` (str, default `""`): Current fashion trends for the item's category, as returned by `get_current_trends()`. If non-empty, appended to the user prompt with an instruction to reference at least one trend.
 
 **What it returns:**
-<!-- Describe the return value -->
-A string with outfit suggestions based on the new item and the user's wardrobe. If the wardrobe is empty, it will suggest general styling advice for the item rather than raising an exception or returning an empty string. 
+A non-empty string with 1-2 named outfit suggestions. Each outfit has a name, a list of pieces by name, and a one-sentence vibe description. If the wardrobe is empty, returns general styling advice (types of pieces that pair well, ≤120 words) instead. If the wardrobe is populated, returns specific outfit combinations using named wardrobe pieces (≤150 words). Never raises an exception.
 
 **What happens if it fails or returns nothing:**
-<!-- What should the agent do if the wardrobe is empty or no outfit can be suggested? -->
-If the wardrobe is empty, it will suggest general styling advice for the item rather than raising an exception or returning an empty string. If it can't suggest an outfit for any other reason, it should return an empty string and the agent should try again.
+If the wardrobe is empty, it falls back to general styling advice via LLM — no exception is raised, no empty string is returned. If the LLM fails for any other reason, the raw exception propagates (no retry in the current implementation, as LLM failures for non-empty valid inputs are extremely rare in practice).
 ---
 
 ### Tool 3: create_fit_card
 
 **What it does:**
-<!-- Describe what this tool does in 1–2 sentences -->
-This tool generates a short, shareable outfit caption for the thrifted find.
+Generates a short, shareable outfit caption (Instagram/TikTok style) for the thrifted find, using the item details and the outfit suggestion.
 
 **Input parameters:**
-<!-- List each parameter, its type, and what it represents -->
-- `outfit` (str): The outfit suggestion from suggest_outfit(). 
-- `new_item` (dict): The new item that the user is considering buying. It contains the following fields: id, title, description, category, style_tags (list), size, condition, price (float), colors (list), brand, platform
+- `outfit` (str): The outfit suggestion string returned by `suggest_outfit()`. Guards against empty or whitespace-only input.
+- `new_item` (dict): The listing dict for the thrifted item. Uses: title, price, platform.
 
 **What it returns:**
-<!-- Describe the return value -->
-A string with a 2-4 sentence outfit caption. The caption should feel casual and authentic (like a real OOTD post, not a product description), mention the item name, price, and platform naturally (once each), capture the outfit vibe in specific terms, and sound different each time for different inputs (use higher LLM temperature)
+A 2-4 sentence string usable as an Instagram/TikTok caption. The caption mentions the item name, price, and platform exactly once each (woven in naturally), captures the specific outfit vibe, and feels fresh and casual. Uses `temperature=1.2` and `max_tokens=200` for variety across calls. If `outfit` is empty or whitespace-only, immediately returns the string `"Error: No outfit suggestion was provided, so a fit card could not be generated. Try searching for an item first and making sure the outfit suggestion step completes successfully."` — no LLM call is made.
 
 **What happens if it fails or returns nothing:**
-<!-- What should the agent do if the outfit data is incomplete? -->
-If the outfit is empty or missing, it should return an error message rather than raising an exception or returning an empty string.
+If the outfit is empty or whitespace-only, the function returns a descriptive, actionable error string immediately — it does NOT raise an exception. The agent checks whether the result starts with `'Error:'` and surfaces it to the user.
 ---
 
-### Additional Tools (if any)
+### Additional Tools
 
-<!-- Copy the block above for any tools beyond the required three -->
+### Tool 4: assess_price
+
+**What it does:**
+Compares the selected item's price against comparable listings in the dataset (same category + overlapping style_tags), then calls the LLM for a one-sentence qualitative verdict.
+
+**Input parameters:**
+- `new_item` (dict): The listing dict of the item being assessed. Uses: title, description, category, condition, price, style_tags.
+
+**What it returns:**
+A combined two-part string:
+1. Data-driven verdict: `"{label} for a used item in this category (avg price: ${avg:.2f}, your price: ${price:.2f}, {pct:.0f}% difference)"` where label is one of *"On the lower side"*, *"Fairly priced"*, or *"On the higher side"*.
+2. LLM one-sentence assessment (`temperature=0.3`, `max_tokens=100`).
+Both parts are joined with a newline. Returns a plain error string if price, condition, or category are missing from the item dict.
+
+**What happens if it fails or returns nothing:**
+If any required field (price, condition, category) is missing, returns `"Unable to assess price: Missing item details..."`. If no comparable listings are found, returns `"No comparable listings found to assess price."`. Never raises an exception.
+
+---
+
+### Tool 5: get_current_trends
+
+**What it does:**
+Looks up current fashion trends for a given clothing category from a curated local JSON file (`data/trends.json`).
+
+**Input parameters:**
+- `category` (str): The category to look up (e.g. `"tops"`, `"bottoms"`). Lookup is case-insensitive (`category.lower()` is used).
+
+**What it returns:**
+A formatted string like `"Current trends for tops: oversized silhouettes, Y2K graphic prints, sheer layering"`, or `""` (empty string) if the category is not in `trends.json`, or if the file is missing or corrupted.
+
+**What happens if it fails or returns nothing:**
+Handles `FileNotFoundError` and `json.JSONDecodeError` by returning `""`. The calling code in `agent.py` checks for an empty string — if it is empty, `suggest_outfit` is called without any trend context and runs normally.
 
 ---
 
@@ -133,9 +157,9 @@ For each tool, describe the specific failure mode you're handling and what the a
 
 | Tool | Failure mode | Agent response |
 |------|-------------|----------------|
-| search_listings | No results match the query | I couldn't find any listings matching '[query]'. Try a different style, size, or price range. |
+| search_listings | No results match the query | We couldn't find any items matching your exact description, size, and price. Try broadening your search terms, removing the size filter, or increasing your budget! |
 | suggest_outfit | Wardrobe is empty | Return general styling advice for the item: "This [item category] pairs well with [complementary items]. Here are some styling ideas: ..." |
-| create_fit_card | Outfit input is missing or incomplete | Error: No outfit suggestion available to generate a fit card. |
+| create_fit_card | Outfit input is missing or incomplete | Error: No outfit suggestion was provided, so a fit card could not be generated. Try searching for an item first and making sure the outfit suggestion step completes successfully. |
 
 ---
 
@@ -305,13 +329,13 @@ It should first use the search_listings tool to find vintage graphic tees under 
 Example query that would cause each tool to fail and the expected behavior:
 
 * search_listings:
-   - User searches for an item that is not in the listings data.
-   - Expected behavior: Returns an empty list.
+   - Query: `"designer ballgown"`, size=`"XXS"`, max_price=`5`
+   - Expected behavior: Returns an empty list `[]`. The agent sets `session["error"]` to *"We couldn't find any items matching your exact description, size, and price. Try broadening your search terms, removing the size filter, or increasing your budget!"* and returns early — `suggest_outfit` and `create_fit_card` are never called.
 
 * suggest_outfit:
-   - User searches for an item that is not in the listings data.
-   - Expected behavior: Returns a message indicating that the item is not in the listings data.
+   - Input: A valid new item + an empty wardrobe (`{"items": []}`)
+   - Expected behavior: Does NOT crash. Instead of pulling wardrobe pieces (there are none), it prompts the LLM for general styling advice for the item, returning a non-empty string like *"Pair this vintage tee with high-waisted jeans and chunky sneakers for a retro streetwear vibe."*
 
 * create_fit_card:
-   - User searches for an item that is not in the listings data.
-   - Expected behavior: Returns a message indicating that the item is not in the listings data.
+   - Input: An empty or whitespace-only `outfit` string (e.g., `""` or `"   "`)
+   - Expected behavior: Does NOT call the LLM. Immediately returns the error string *"Error: No outfit suggestion was provided, so a fit card could not be generated. Try searching for an item first and making sure the outfit suggestion step completes successfully."*

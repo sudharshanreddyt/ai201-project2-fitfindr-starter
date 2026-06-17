@@ -18,7 +18,7 @@ Usage (once implemented):
     print(result["error"])   # None on success
 """
 
-from tools import search_listings, suggest_outfit, create_fit_card, _get_groq_client
+from tools import search_listings, suggest_outfit, create_fit_card, assess_price, get_current_trends, _get_groq_client
 import json
 
 # ── session state ─────────────────────────────────────────────────────────────
@@ -41,6 +41,8 @@ def _new_session(query: str, wardrobe: dict) -> dict:
         "wardrobe": wardrobe,        # user's wardrobe dict
         "outfit_suggestion": None,   # string returned by suggest_outfit
         "fit_card": None,            # string returned by create_fit_card
+        "price_verdict": None,       # string returned by assess_price
+        "trend_context": None,       # string returned by get_current_trends
         "error": None,               # set if the interaction ended early
     }
 
@@ -78,9 +80,11 @@ def run_agent(query: str, wardrobe: dict) -> dict:
                 return the session early. Do NOT proceed to suggest_outfit
                 with empty input.
 
-        Step 4: Select the item to use (e.g., the top result).
+        Step 4a: Select the item to use (e.g., the top result).
                 Store it in session["selected_item"].
-
+        Step 4b: Get current trends for the selected item's category
+                Store the result in session["trend_context"]. If no trends are found, set session["trend_context"] to None (optional).
+        
         Step 5: Call suggest_outfit() with the selected item and wardrobe.
                 Store the result in session["outfit_suggestion"].
 
@@ -134,18 +138,28 @@ def run_agent(query: str, wardrobe: dict) -> dict:
     session["search_results"] = results # always store, even if []
     
     if not results: # if the results list is empty
-        session["error"] = "No relevant listings found."
+        session["error"] = "We couldn't find any items matching your exact description, size, and price. Try broadening your search terms, removing the size filter, or increasing your budget!"
         return session
 
-    # Step 4: Select the item to use (e.g., the top result).
+    # Step 4a: Select the item to use (e.g., the top result).
     # Store it in session["selected_item"].
     session["selected_item"] = results[0]
+
+    # Step 4b: Get current trends for the selected item's category
+    # Store the result in session["trend_context"]. If no trends are found, set session["trend_context"] to None (optional).
+    category = session["selected_item"]["category"]
+    if category:
+        trends = get_current_trends(category)
+        session["trend_context"] = trends
+    else:
+        session["trend_context"] = None
     
     # Step 5: Call suggest_outfit() with the selected item and wardrobe.
     # Store the result in session["outfit_suggestion"].
     suggested_outfit = suggest_outfit(
         session["selected_item"],
         wardrobe,
+        trend_context=session["trend_context"]
     )
     session["outfit_suggestion"] = suggested_outfit
     
@@ -156,7 +170,11 @@ def run_agent(query: str, wardrobe: dict) -> dict:
         session["selected_item"],
     )
     session["fit_card"] = fit_card
-    
+
+    # Step 7: Assess the price of the selected item
+    price_verdict = assess_price(session["selected_item"])
+    session["price_verdict"] = price_verdict
+
     return session
 
 
